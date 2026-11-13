@@ -40,8 +40,8 @@ Features:
 | Booting | Rainbow |
 | No Wi-Fi / HA connection | Red pulse |
 | Wake word detected | Solid blue `#03A9F4` |
-| Listening / replying | HA blue bands, slow rotation |
-| Thinking | HA blue bands, fast rotation |
+| Listening / replying | Fades through HA blues, slow |
+| Thinking | Fades through HA blues, fast |
 | Error | Red fast pulse |
 | Alarm/timer ringing | Purple strobe |
 | Timer running | Purple slow pulse |
