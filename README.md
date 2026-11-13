@@ -51,6 +51,8 @@ Features:
 
 The on-board PCF85063 RTC is read at boot and updated on every Home Assistant time sync, so alarms keep working without HA.
 
+Set the alarm in HA with `Alarm time` (`HH:MM`), `Alarm` (on/off) and `Alarm action`.
+
 ## Lower room speakers during a voice request
 
 The device ducks its own media. To also turn down other speakers in the room, snapshot them when the satellite leaves `idle` and restore them when it returns to `idle`. Replace the entity IDs with your own:

@@ -74,8 +74,6 @@ esphome:
             id(adc_mic).set_mic_gain(id(mic_gain_db).state);
             id(va_mic).set_gain_factor(id(va_gain_factor).state);
             id(va).set_noise_suppression_level(id(va_noise_suppression).state);
-        - lambda: |-
-            id(alarm_time).publish_state(id(saved_alarm_time));
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -124,17 +122,6 @@ api:
     - action: stop_va
       then:
         - voice_assistant.stop
-    - action: set_alarm_time
-      variables:
-        alarm_time_hh_mm: string
-      then:
-        - lambda: |-
-            if (alarm_time_hh_mm.length() == 5 &&
-              isdigit(alarm_time_hh_mm[0]) && isdigit(alarm_time_hh_mm[1]) &&
-              isdigit(alarm_time_hh_mm[3]) && isdigit(alarm_time_hh_mm[4])) {
-                id(alarm_time).publish_state(alarm_time_hh_mm);
-                id(saved_alarm_time) = alarm_time_hh_mm;
-              }
   on_client_connected:
     - script.execute: control_leds
   on_client_disconnected:
@@ -621,10 +608,6 @@ globals:
     type: int
     restore_value: no
     initial_value: ${voice_assist_not_ready_phase_id}
-  - id: saved_alarm_time
-    type: std::string
-    restore_value: yes
-    initial_value: '"Unknown"'
   - id: first_active_timer
     type: voice_assistant::Timer
     restore_value: no
@@ -881,7 +864,7 @@ script:
     then:
       - lambda: |-
           id(publish_current_time).execute();
-          if (id(alarm_on).state && id(alarm_time).has_state()) {
+          if (id(alarm_on).state) {
             auto set_alarm_time = id(alarm_time).state;
             if (set_alarm_time.length() == 5 &&
                 isdigit(set_alarm_time[0]) && isdigit(set_alarm_time[1]) &&
@@ -1173,16 +1156,25 @@ sensor:
     icon: "mdi:timer"
     accuracy_decimals: 0
 
+text:
+  - platform: template
+    id: alarm_time
+    name: "Alarm time"
+    icon: mdi:bell-ring
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: "07:00"
+    min_length: 5
+    max_length: 5
+    pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" # HH:MM, enforced by the HA frontend
+
 text_sensor:
   - platform: template
     id: next_timer_name
     name: "Next timer name"
     icon: "mdi:timer"
     disabled_by_default: true
-  - platform: template
-    name: "Alarm time"
-    id: alarm_time
-    icon: mdi:bell-ring
   - platform: template
     name: "Device time"
     entity_category: diagnostic
