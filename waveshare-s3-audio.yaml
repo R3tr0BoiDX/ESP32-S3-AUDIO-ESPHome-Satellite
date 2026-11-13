@@ -73,15 +73,17 @@ esphome:
             id(i2s_audio_speaker)->start();
         - pcf85063.read_time:
             id: rtc
+        # Template numbers only restore their state, set_action does not run at boot
+        - lambda: |-
+            id(adc_mic).set_mic_gain(id(mic_gain_db).state);
+            id(va_mic).set_gain_factor(id(va_gain_factor).state);
+            id(va).set_noise_suppression_level(id(va_noise_suppression).state);
         - lambda: |-
             id(alarm_time).publish_state(id(saved_alarm_time));
         - lambda: |-
             auto call = id(alarm_action).make_call();
             call.set_option(id(saved_alarm_action));
             call.perform();
-        - lambda: |-
-            setenv("TZ", id(saved_time_zone).c_str(), 1);
-            tzset();
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -158,15 +160,6 @@ api:
                 id(alarm_time).publish_state(alarm_time_hh_mm);
                 id(saved_alarm_time) = alarm_time_hh_mm;
               }
-    - action: set_time_zone
-      variables:
-        posix_time_zone: string
-      then:
-        - lambda: |-
-            setenv("TZ", posix_time_zone.c_str(), 1);
-            tzset();
-            id(saved_time_zone) = posix_time_zone;
-            id(publish_current_time).execute();
   on_client_connected:
     - script.execute: control_leds
   on_client_disconnected:
@@ -726,10 +719,6 @@ globals:
     type: std::string
     restore_value: yes
     initial_value: '"Unknown"'
-  - id: saved_time_zone
-    type: std::string
-    restore_value: yes
-    initial_value: '"UTC0"'
   - id: saved_alarm_action
     type: std::string
     restore_value: yes
@@ -1211,10 +1200,11 @@ switch:
       - script.execute: control_leds
 
 number:
-  - platform: template # MIC DEBUG
+  - platform: template
     id: mic_gain_db
     name: "Mic gain"
     entity_category: config
+    optimistic: true
     min_value: 0
     max_value: 42
     step: 1
@@ -1231,6 +1221,7 @@ number:
     id: va_gain_factor
     name: "Mic gain factor"
     entity_category: config
+    optimistic: true
     min_value: 1
     max_value: 64
     step: 1
@@ -1247,6 +1238,7 @@ number:
     id: va_noise_suppression
     name: "Noise suppression"
     entity_category: config
+    optimistic: true
     min_value: 0
     max_value: 4
     step: 1
