@@ -39,9 +39,9 @@ Features:
 |-------|------|
 | Booting | Rainbow |
 | No Wi-Fi / HA connection | Red pulse |
-| Wake word detected | Solid blue `#03A9F4` |
-| Listening / replying | Fades through HA blues, slow |
-| Thinking | Fades through HA blues, fast |
+| Wake word detected | Solid blue |
+| Listening / replying | Fades through blues, slow |
+| Thinking | Fades through blues, fast |
 | Error | Red fast pulse |
 | Alarm/timer ringing | Purple strobe |
 | Timer running | Purple slow pulse |
@@ -188,7 +188,3 @@ speaker:
   # add mixer/resampler speakers on top as needed,
   # see waveshare-s3-audio.yaml
 ```
-
-## TODO
-
-- Filter speaker output from the mic input (echo cancellation with the IDF-SR AFE). Until then, ducking is the stopgap.
