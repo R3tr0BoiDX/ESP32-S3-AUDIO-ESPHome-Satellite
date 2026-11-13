@@ -64,6 +64,13 @@ esphome:
               - script.execute: control_leds
     - priority: -100
       then:
+        # The ES8311 is I2S master for mic AND speaker but derives BCLK/LRCK from
+        # MCLK, which the ESP only outputs while the speaker port runs. Start it
+        # silently now (timeout: never keeps it on), otherwise the mic runs on bad
+        # clocks until the first sound plays and wake word detection stalls.
+        - lambda: |-
+            id(i2s_audio_speaker)->set_audio_stream_info(audio::AudioStreamInfo(16, 2, ${i2s_sample_rate}));
+            id(i2s_audio_speaker)->start();
         - pcf85063.read_time:
             id: rtc
         - lambda: |-
