@@ -18,7 +18,6 @@ substitutions:
   amp_ctrl: 8 #9 #Extended IO pin that controls the PA_EN on the TCA9555
   i2c_scl: GPIO10
   i2c_sda: GPIO11
-  rtc_int: 5 #ExtendedIO
 
   #mic lookup
   mic_channel_0: "left"
@@ -28,10 +27,7 @@ substitutions:
   #WORKING
   which_mic: 0 #0=left, 1=right, 2=stereo
   i2s_sample_rate: 16000 # Works as in sync with microphone (mic must have 16000 for voice assistant)
-  i2s_bits_per_sample: 32
-  #i2s_bits_per_sample: 16
   i2s_mode_mic: secondary
-  i2s_mode_speaker: secondary
   i2s_use_apll: true
   i2s_bps_spk: 16bit
   i2s_bps_mic: 16bit
@@ -80,10 +76,6 @@ esphome:
             id(va).set_noise_suppression_level(id(va_noise_suppression).state);
         - lambda: |-
             id(alarm_time).publish_state(id(saved_alarm_time));
-        - lambda: |-
-            auto call = id(alarm_action).make_call();
-            call.set_option(id(saved_alarm_action));
-            call.perform();
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -116,16 +108,9 @@ wifi:
   power_save_mode: none # Disable power saving for better performance
   reboot_timeout: 10min # Prevent unnecessary reboots
   on_connect:
-    - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
   on_disconnect:
     - script.execute: control_leds
-
-#network:
-#  enable_ipv6: true
-
-debug:
-  update_interval: 5s
 
 logger:
   level: DEBUG
@@ -133,16 +118,6 @@ logger:
 api:
   id: api_id
   actions:
-    - action: set_led_color
-      variables:
-        red: float
-        green: float
-        blue: float
-      then:
-        - lambda: |-
-            id(led_ring_color_r) = std::min(1.0f, std::max(0.0f, red));
-            id(led_ring_color_g) = std::min(1.0f, std::max(0.0f, green));
-            id(led_ring_color_b) = std::min(1.0f, std::max(0.0f, blue));
     - action: start_va
       then:
         - voice_assistant.start
@@ -168,9 +143,6 @@ api:
   encryption:
     key: !secret api_encryption_key
 
-# http_request:
-#   verify_ssl: false
-
 ota:
   - platform: esphome
     id: ota_esphome
@@ -185,8 +157,8 @@ web_server:
 
 i2c:
   - id: internal_i2c
-    sda: GPIO11
-    scl: GPIO10
+    sda: $i2c_sda
+    scl: $i2c_scl
     scan: true
     frequency: 100kHz
 
@@ -324,20 +296,13 @@ audio_adc:
     i2c_id: internal_i2c
     sample_rate: $i2s_sample_rate
     bits_per_sample: $i2s_bps_mic
-    #bits_per_sample: "${i2s_bits_per_sample}bit"
 
-# external_components:
-#   - source:
-#       type: local
-#       path: components
-#     components: [ es8311 ]
+# Patched ES8311 from this repo (see README for the git source)
 external_components:
   - source:
-      type: git
-      url: "https://github.com/sw3Dan/waveshare-s2-audio_esphome_voice"
-      ref: main
+      type: local
+      path: components
     components: [es8311]
-    refresh: 0s
 
 audio_dac:
   - platform: es8311
@@ -346,7 +311,6 @@ audio_dac:
     use_mclk: true
     sample_rate: $i2s_sample_rate
     bits_per_sample: $i2s_bps_spk
-    #bits_per_sample: "${i2s_bits_per_sample}bit"
     force_master: true
     mclk_multiple: $i2s_mclk_multiple
 
@@ -358,39 +322,27 @@ microphone:
     pdm: false
     i2s_audio_id: i2s_input
     i2s_mode: $i2s_mode_mic
-
-    #sample_rate: $i2s_sample_rate
-    sample_rate: 16000
-
+    sample_rate: $i2s_sample_rate
     bits_per_sample: $i2s_bps_mic
-    #bits_per_sample: "${i2s_bits_per_sample}bit"
-
     use_apll: $i2s_use_apll
     mclk_multiple: $i2s_mclk_multiple
-    #channel: stereo
     channel: ${mic_channel_${which_mic}}
 
 speaker:
   - platform: i2s_audio
     id: i2s_audio_speaker
     i2s_dout_pin: GPIO16
-
     i2s_audio_id: i2s_output
-    i2s_mode: secondary #using the patched es8311
-
+    i2s_mode: secondary # the patched ES8311 is master
     dac_type: external
     timeout: never
     buffer_duration: 100ms
     audio_dac: es8311_dac
     sample_rate: $i2s_sample_rate
-    #bits_per_sample: "${i2s_bits_per_sample}bit"
-    #bits_per_sample: $i2s_bps_spk
-    bits_per_sample: 16bit #TEMP FIX
+    bits_per_sample: $i2s_bps_spk
     use_apll: $i2s_use_apll
     mclk_multiple: $i2s_mclk_multiple
-    #channel: mono #WORKS
-    channel: stereo #WORKS #TEST: STREAM ERROR
-    #channel: ${mic_channel_${which_mic}}
+    channel: stereo
 
   # Virtual speakers to combine the announcement and media streams together into one output
   - platform: mixer
@@ -477,9 +429,7 @@ voice_assistant:
   microphone:
     id: va_mic
     microphone: i2s_mics
-    #channels: 1 #Right
-    #channels: 0 #Left
-    channels: $which_mic #correct that it's left/right cannel OR number of channels?
+    channels: $which_mic
   media_player: external_media_player
   micro_wake_word: mww
   use_wake_word: false
@@ -589,35 +539,11 @@ voice_assistant:
         id(next_timer).publish_state(-1);
         id(next_timer_name).publish_state("-");
   on_timer_started:
-    - lambda: |
-        id(check_if_timers_active).execute();
-        if (id(is_timer_active)) {
-          id(fetch_first_active_timer).execute();
-          id(next_timer).publish_state(id(first_active_timer).seconds_left);
-          id(next_timer_name).publish_state(id(first_active_timer).name);
-        }
-    - script.execute: control_leds
+    - script.execute: publish_next_timer
   on_timer_cancelled:
-    - lambda: |
-        id(check_if_timers_active).execute();
-        if (id(is_timer_active)) {
-          id(fetch_first_active_timer).execute();
-          id(next_timer).publish_state(id(first_active_timer).seconds_left);
-          id(next_timer_name).publish_state(id(first_active_timer).name);
-        } else {
-          id(next_timer).publish_state(-1);
-          id(next_timer_name).publish_state("-");
-        }
-    - script.execute: control_leds
+    - script.execute: publish_next_timer
   on_timer_updated:
-    - lambda: |
-        id(check_if_timers_active).execute();
-        if (id(is_timer_active)) {
-          id(fetch_first_active_timer).execute();
-          id(next_timer).publish_state(id(first_active_timer).seconds_left);
-          id(next_timer_name).publish_state(id(first_active_timer).name);
-        }
-    - script.execute: control_leds
+    - script.execute: publish_next_timer
   on_timer_tick:
     - lambda: |
         id(fetch_first_active_timer).execute();
@@ -632,23 +558,19 @@ micro_wake_word:
   microphone:
     microphone: i2s_mics
     channels: $which_mic
-    #gain_factor: 4
   stop_after_detection: false
   models:
     - model: https://github.com/kahrendt/microWakeWord/releases/download/okay_nabu_20241226.3/okay_nabu.json
-      #probability_cutoff: 0.03 # 0.8
       id: okay_nabu
     - model: https://raw.githubusercontent.com/formatBCE/Respeaker-Lite-ESPHome-integration/refs/heads/main/microwakeword/models/v2/kenobi.json
       id: kenobi
     - model: hey_jarvis
       id: hey_jarvis
-    #- model: hey_mycroft
-    #  id: hey_mycroft
     - model: https://github.com/kahrendt/microWakeWord/releases/download/stop/stop.json
       id: stop
-      internal: true #false
+      internal: true
   vad:
-    probability_cutoff: 0.03 #0.03
+    probability_cutoff: 0.03
   on_wake_word_detected:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
@@ -691,26 +613,10 @@ micro_wake_word:
                                 wake_word: !lambda return wake_word;
 
 globals:
-  - id: led_ring_color_r
-    type: float
-    restore_value: yes
-    initial_value: "1.0"
-  - id: led_ring_color_g
-    type: float
-    restore_value: yes
-    initial_value: "0.0"
-  - id: led_ring_color_b
-    type: float
-    restore_value: yes
-    initial_value: "1.0"
   - id: init_in_progress
     type: bool
     restore_value: no
     initial_value: "true"
-  - id: improv_ble_in_progress
-    type: bool
-    restore_value: no
-    initial_value: "false"
   - id: voice_assistant_phase
     type: int
     restore_value: no
@@ -719,20 +625,12 @@ globals:
     type: std::string
     restore_value: yes
     initial_value: '"Unknown"'
-  - id: saved_alarm_action
-    type: std::string
-    restore_value: yes
-    initial_value: '"Play sound"'
   - id: first_active_timer
     type: voice_assistant::Timer
     restore_value: no
   - id: is_timer_active
     type: bool
     restore_value: no
-  - id: factory_reset_requested
-    type: bool
-    restore_value: no
-    initial_value: "false"
 
 script:
   - id: flash_ring
@@ -770,10 +668,7 @@ script:
       b: float
     then:
       - lambda: |-
-          id(led_ring_color_r) = r;
-          id(led_ring_color_g) = g;
-          id(led_ring_color_b) = b;
-          ESP_LOGI("led", "led_set_effect: effect='%s' rgb(%.2f, %.2f, %.2f) brightness=%.2f",
+          ESP_LOGD("led", "led_set_effect: effect='%s' rgb(%.2f, %.2f, %.2f) brightness=%.2f",
                    effect.c_str(), r, g, b, (float) id(led_ring_brightness).state);
       - if:
           condition:
@@ -781,24 +676,13 @@ script:
           then:
             - light.turn_off: status_ring
           else:
-            - if:
-                condition:
-                  lambda: 'return effect == "solid";'
-                then:
-                  - light.turn_on:
-                      id: status_ring
-                      brightness: !lambda "return id(led_ring_brightness).state;"
-                      red: !lambda "return id(led_ring_color_r);"
-                      green: !lambda "return id(led_ring_color_g);"
-                      blue: !lambda "return id(led_ring_color_b);"
-                else:
-                  - light.turn_on:
-                      id: status_ring
-                      brightness: !lambda "return id(led_ring_brightness).state;"
-                      red: !lambda "return id(led_ring_color_r);"
-                      green: !lambda "return id(led_ring_color_g);"
-                      blue: !lambda "return id(led_ring_color_b);"
-                      effect: !lambda "return effect;"
+            - light.turn_on:
+                id: status_ring
+                brightness: !lambda "return id(led_ring_brightness).state;"
+                red: !lambda "return r;"
+                green: !lambda "return g;"
+                blue: !lambda "return b;"
+                effect: !lambda 'return effect == "solid" ? std::string("None") : effect;'
 
   # Single LED state machine (small footprint)
   - id: control_leds
@@ -808,7 +692,6 @@ script:
           const bool wifi_connected = id(wifi_id).is_connected();
           const bool api_connected  = id(api_id).is_connected();
           const bool ringing        = id(timer_ringing).state;
-          const bool improv_ble     = id(improv_ble_in_progress);
           const bool init_progress  = id(init_in_progress);
           const int  phase          = id(voice_assistant_phase);
 
@@ -817,18 +700,14 @@ script:
           const bool timers_active = id(is_timer_active);
 
           ESP_LOGD("led",
-                   "control_leds: wifi=%d api=%d improv=%d init=%d ringing=%d timers_active=%d phase=%d",
-                   (int)wifi_connected, (int)api_connected, (int)improv_ble, (int)init_progress,
+                   "control_leds: wifi=%d api=%d init=%d ringing=%d timers_active=%d phase=%d",
+                   (int)wifi_connected, (int)api_connected, (int)init_progress,
                    (int)ringing, (int)timers_active, phase);
 
           auto set = [&](const char* effect, float r, float g, float b) {
             id(led_set_effect).execute(effect, r, g, b);
           };
 
-          if (improv_ble) {                          // Provisioning
-            set("Pulse Medium", 1.0, 0.89, 0.71);    // warm white
-            return;
-          }
           if (init_progress) {                       // Boot/init
             if (wifi_connected) set("Rainbow Slow", 0.9, 0.1, 0.85); else set("Rainbow Slow", 1.0, 0.1, 0.1);
             return;
@@ -930,6 +809,20 @@ script:
           }
 
   # Timer helpers
+  - id: publish_next_timer
+    then:
+      - lambda: |-
+          id(check_if_timers_active).execute();
+          if (id(is_timer_active)) {
+            id(fetch_first_active_timer).execute();
+            id(next_timer).publish_state(id(first_active_timer).seconds_left);
+            id(next_timer_name).publish_state(id(first_active_timer).name);
+          } else {
+            id(next_timer).publish_state(-1);
+            id(next_timer_name).publish_state("-");
+          }
+      - script.execute: control_leds
+
   - id: fetch_first_active_timer
     mode: single
     then:
@@ -1085,6 +978,7 @@ select:
     disabled_by_default: true
   - platform: template
     optimistic: true
+    restore_value: true
     name: "Alarm action"
     entity_category: config
     id: alarm_action
@@ -1094,10 +988,6 @@ select:
       - "Send event"
       - "Sound and event"
     initial_option: "Play sound"
-    on_value:
-      then:
-        - lambda: |-
-            id(saved_alarm_action) = x;
 
 switch:
   - platform: gpio
