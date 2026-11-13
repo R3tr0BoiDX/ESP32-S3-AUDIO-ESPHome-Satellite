@@ -1,116 +1,27 @@
-ESPHome configuration for enabeling WAVESHARE-S3-AUDIO-BOARD (https://www.waveshare.com/esp32-s3-audio-board.htm)
-to be used as a HomeAssistant Voice Satellite. Features such as simultanious music/and announcements and
-continious on-board wake-word detection.
+# Waveshare ESP32-S3 Audio Board as a Home Assistant voice satellite
 
-The device's DAC and ADC share pins for the i2s bus so to be able to configure two i2s_audio points for 
-simultanious audio in/out I had to path the DAC (es8311) component, adding a setting to force it to become 
-i2s master while still configuring the ESP and ADC to act as i2s slaves. I also had to fix MCLK/BLCK calculations.
+ESPHome configuration that turns the [Waveshare ESP32-S3 Audio Board](https://www.waveshare.com/esp32-s3-audio-board.htm) into a Home Assistant voice satellite.
 
-example code features:
-* complete Voice Assistant setup
-* Onboard Wake-Word detection
-* Led animations and event sounds
-* working control buttons
-* exposed announcement and music media_players
-* built in alarm and timer
+Features:
+- Full voice assistant pipeline with on-device wake word detection (microWakeWord)
+- Music and announcements at the same time, with ducking
+- LED ring feedback and event sounds
+- Hardware buttons for volume, play/pause and mute
+- Built-in timers and alarm, kept running by the on-board RTC
 
-Steps to use the custom ES8311 component:
-``` yaml
-substitutions:
-  i2c_id: internal_i2c
-  i2s_mclk_multiple: 256
-  i2s_bps_spk: 16bit
-  i2s_bps_mic: 16bit
-  i2s_sample_rate_spk: 16000
-  i2s_sample_rate_mic: 16000 # must be 16000 for voice_assistant to work(?)
-  i2s_use_apll: true
-  
-external_components:
-  - source:
-      type: git
-      url: https://github.com/sw3Dan/waveshare-s2-audio_esphome_voice
-      ref: main
-    components: [ es8311 ]
-    refresh: 0s
+## Install
 
-i2c:
-  - id: $i2c_id
-    sda: GPIO11
-    scl: GPIO10
-    scan: true
-
-i2s_audio:
-  - id: i2s_output
-    i2s_lrclk_pin: 
-      number: GPIO14
-      allow_other_uses: true
-    i2s_bclk_pin:  
-      number: GPIO13
-      allow_other_uses: true
-    i2s_mclk_pin: # <-- for ESP to know what port to configure MCLK output
-      number: GPIO12
-
-  - id: i2s_input
-    i2s_lrclk_pin:  
-      number: GPIO14
-      allow_other_uses: true
-    i2s_bclk_pin:  
-      number: GPIO13
-      allow_other_uses: true
-
-audio_dac:
-  - platform: es8311
-    id: es8311_dac
-    i2c_id: $i2c_id
-    use_mclk: true
-    sample_rate: $i2s_sample_rate
-    bits_per_sample: $i2s_bps_spk
-    force_master: true # <-- New: to configure device as i2s master
-    mclk_multiple: i2s_mclk_multiple # <-- New: for the i2s bus MCLK/BLCK calculations
-
-audio_adc:
-  - platform: es7210
-    id: adc_mic
-    i2c_id: $i2c_id
-    sample_rate: $i2s_sample_rate
-    bits_per_sample: $i2s_bps_mic
-
-microphone:
-  - platform: i2s_audio
-    id: i2s_mics
-    i2s_din_pin: GPIO15
-    adc_type: external
-    pdm: false
-    i2s_audio_id: i2s_input
-    i2s_mode: secondary # <-- so that ESP wont generate LRCLK/BLCK
-    mclk_multiple: $i2s_mclk_multiple
-    sample_rate: $i2s_sample_rate_mic # must be 16000 for VA (?)
-    bits_per_sample: $i2s_bps_mic
-    
-speaker:
-  - platform: i2s_audio
-    id: i2s_audio_speaker
-    i2s_dout_pin: GPIO16
-    i2s_audio_id: i2s_output
-    i2s_mode: secondary # component patch will force ES8311 to take command
-    dac_type: external
-    timeout: never
-    buffer_duration: 100ms
-    audio_dac: es8311_dac
-    sample_rate: $i2s_sample_rate_spk
-    bits_per_sample: $i2s_bps_spk
-    use_apll: $i2s_use_apll # dont know if this is enforced when in 'secondary' i2s mode
-    mclk_multiple: $i2s_mclk_multiple
-    channel: stereo
-
-  - platform: mixer
-    id: mixing_speaker
-    output_speaker: i2s_audio_speaker
-    num_channels: 2
-    source_speakers:
-
-** Then create speaker: speaker/resamplers as needed ** 
-```
+1. Create `secrets.yaml` next to the config (it is gitignored):
+   ```yaml
+   wifi_ssid: ...
+   wifi_password: ...
+   api_encryption_key: ...   # 32 bytes, base64
+   ota_password: ...
+   device_name_web_username: ...
+   device_name_web_password: ...
+   ```
+2. Flash: `esphome run waveshare-s3-audio.yaml`
+3. Add the device in Home Assistant (it is discovered automatically).
 
 ## Controls
 
@@ -140,15 +51,11 @@ speaker:
 
 The on-board PCF85063 RTC is read at boot and updated on every Home Assistant time sync, so alarms keep working without HA.
 
-## Secrets
-
-`secrets.yaml` (not in git) needs: `wifi_ssid`, `wifi_password`, `api_encryption_key`, `ota_password`, `device_name_web_username`, `device_name_web_password`.
-
 ## Lower room speakers during a voice request
 
-The device ducks its own media. To also turn down other speakers in the room, snapshot them when the satellite leaves `idle` and restore them when it goes back to `idle`. Replace the entity ids with your own:
+The device ducks its own media. To also turn down other speakers in the room, snapshot them when the satellite leaves `idle` and restore them when it returns to `idle`. Replace the entity IDs with your own:
 
-``` yaml
+```yaml
 automation:
   - alias: Duck room speakers during voice requests
     mode: queued
@@ -188,6 +95,87 @@ automation:
                   entity_id: scene.before_voice_request
 ```
 
+## Patched ES8311 component
+
+The DAC (ES8311) and ADC (ES7210) share the I2S clock pins. To run two `i2s_audio` buses for simultaneous playback and recording, the bundled `es8311` component adds `force_master`, which makes the ES8311 the I2S master while the ESP32 and the ADC run as secondaries. It also fixes the MCLK/BCLK calculation (`mclk_multiple`).
+
+To use it in your own config:
+
+```yaml
+substitutions:
+  i2s_sample_rate: 16000 # the voice assistant needs 16 kHz on the mic
+  i2s_bps: 16bit
+  i2s_mclk_multiple: 256
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/sw3Dan/waveshare-s2-audio_esphome_voice
+      ref: main
+    components: [es8311]
+    refresh: 0s
+
+i2c:
+  - id: internal_i2c
+    sda: GPIO11
+    scl: GPIO10
+
+i2s_audio:
+  - id: i2s_output
+    i2s_lrclk_pin: { number: GPIO14, allow_other_uses: true }
+    i2s_bclk_pin: { number: GPIO13, allow_other_uses: true }
+    i2s_mclk_pin: GPIO12 # tells the ESP32 which pin carries MCLK
+  - id: i2s_input
+    i2s_lrclk_pin: { number: GPIO14, allow_other_uses: true }
+    i2s_bclk_pin: { number: GPIO13, allow_other_uses: true }
+
+audio_dac:
+  - platform: es8311
+    id: es8311_dac
+    i2c_id: internal_i2c
+    use_mclk: true
+    sample_rate: $i2s_sample_rate
+    bits_per_sample: $i2s_bps
+    force_master: true # new: ES8311 drives the I2S clocks
+    mclk_multiple: $i2s_mclk_multiple # new: used for the MCLK/BCLK calculation
+
+audio_adc:
+  - platform: es7210
+    id: adc_mic
+    i2c_id: internal_i2c
+    sample_rate: $i2s_sample_rate
+    bits_per_sample: $i2s_bps
+
+microphone:
+  - platform: i2s_audio
+    id: i2s_mics
+    i2s_din_pin: GPIO15
+    adc_type: external
+    pdm: false
+    i2s_audio_id: i2s_input
+    i2s_mode: secondary # the ESP32 must not drive LRCLK/BCLK
+    sample_rate: $i2s_sample_rate
+    bits_per_sample: $i2s_bps
+    mclk_multiple: $i2s_mclk_multiple
+
+speaker:
+  - platform: i2s_audio
+    id: i2s_audio_speaker
+    i2s_dout_pin: GPIO16
+    i2s_audio_id: i2s_output
+    i2s_mode: secondary # the ES8311 is master
+    dac_type: external
+    audio_dac: es8311_dac
+    timeout: never
+    buffer_duration: 100ms
+    sample_rate: $i2s_sample_rate
+    bits_per_sample: $i2s_bps
+    mclk_multiple: $i2s_mclk_multiple
+    channel: stereo
+  # add mixer/resampler speakers on top as needed,
+  # see waveshare-s3-audio.yaml
+```
+
 ## TODO
 
-* Filter speaker output from the mic input (echo cancellation with the IDF-SR AFE). Until then, ducking is the stopgap.
+- Filter speaker output from the mic input (echo cancellation with the IDF-SR AFE). Until then, ducking is the stopgap.
