@@ -64,6 +64,8 @@ esphome:
               - script.execute: control_leds
     - priority: -100
       then:
+        - pcf85063.read_time:
+            id: rtc
         - lambda: |-
             id(alarm_time).publish_state(id(saved_alarm_time));
         - lambda: |-
@@ -198,15 +200,28 @@ psram:
   mode: octal
   speed: 80MHz
 
+# Both sources set the same system clock: the RTC at boot, HA on every sync.
+# id(rtc).now() is therefore valid as soon as either one has a time, so
+# alarms keep working without HA.
 time:
-  - platform: homeassistant
+  - platform: pcf85063
     id: rtc
+    i2c_id: internal_i2c
+    address: 0x51
+    update_interval: never # read once at boot, HA keeps it in sync after that
     on_time:
       - seconds: 0
         minutes: /1
         then:
           - script.execute: check_alarm
     on_time_sync:
+      - script.execute: publish_current_time
+
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      - pcf85063.write_time:
+          id: rtc
       - script.execute: publish_current_time
 
 light:
@@ -986,7 +1001,7 @@ script:
               auto alarm_minute = std::stoi(set_alarm_time.substr(3, 2));
               auto time_now = id(rtc).now();
               if (time_now.hour == alarm_hour && time_now.minute == alarm_minute) {
-                auto action = id(alarm_action).state;
+                auto action = id(alarm_action).current_option();
                 if (action == "Play sound") {
                   id(timer_ringing).turn_on();
                 } else if (action == "Send event") {
