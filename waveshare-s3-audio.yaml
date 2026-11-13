@@ -1,15 +1,15 @@
 substitutions:
   device_name: esp32-audio-s3
   friendly: Waveshare-Audio-3
-  
+
   # Phases of the Voice Assistant
-  voice_assist_idle_phase_id: '1' # ready to be triggered by a wake word
-  voice_assist_waiting_for_command_phase_id: '2' # waiting for a voice command (after being triggered by the wake word)
-  voice_assist_listening_for_command_phase_id: '3' # listening for a voice command
-  voice_assist_thinking_phase_id: '4' # processing the command
-  voice_assist_replying_phase_id: '5' # replying to the command
-  voice_assist_not_ready_phase_id: '10' # not ready
-  voice_assist_error_phase_id: '11' #encountered an error
+  voice_assist_idle_phase_id: "1" # ready to be triggered by a wake word
+  voice_assist_waiting_for_command_phase_id: "2" # waiting for a voice command (after being triggered by the wake word)
+  voice_assist_listening_for_command_phase_id: "3" # listening for a voice command
+  voice_assist_thinking_phase_id: "4" # processing the command
+  voice_assist_replying_phase_id: "5" # replying to the command
+  voice_assist_not_ready_phase_id: "10" # not ready
+  voice_assist_error_phase_id: "11" #encountered an error
 
   i2s_mclk: GPIO12
   i2s_bclk: GPIO13 #SCLK
@@ -21,9 +21,9 @@ substitutions:
   rtc_int: 5 #ExtendedIO
 
   #mic lookup
-  mic_channel_0: 'left'
-  mic_channel_1: 'right' # mic wont allow right
-  mic_channel_2: 'stereo' # voice assistant does not support stereo
+  mic_channel_0: "left"
+  mic_channel_1: "right" # mic wont allow right
+  mic_channel_2: "stereo" # voice assistant does not support stereo
 
   #WORKING
   which_mic: 0 #0=left, 1=right, 2=stereo
@@ -38,20 +38,12 @@ substitutions:
   i2s_mclk_multiple: 256 # 128, 256, 384, 512
 
   hidden_ssid: "false"
-  led_num: '7' # WS2812 ring leds
-
-# Pre-configured camera code
-# exposes UI controls to Homeassistant
-# ====================================
-#packages: # REMOTE (GIT)
-#  remote_package_shorthand: github://esphome/sw3Dan/waveshare-s2-audio_esphome_voice/waveshare_camera_pkg.yaml@main
-#packages: # LOCAL FILE
-#  dynamic-cam: !include
-#    file: waveshare_camera_pkg.yaml
+  led_num: "7" # WS2812 ring leds
 
 esphome:
   name: $device_name
   friendly_name: $friendly
+  name_add_mac_suffix: true
   min_version: 2025.8.0
   on_boot:
     - priority: -100
@@ -112,13 +104,15 @@ esp32:
       CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
 
       CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
-      CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y"  # TLS1.3 support isn't enabled by default in IDF 5.1.5
+      CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y" # TLS1.3 support isn't enabled by default in IDF 5.1.5
 
 wifi:
   id: wifi_id
   fast_connect: ${hidden_ssid}
-  power_save_mode: none  # Disable power saving for better performance
-  reboot_timeout: 10min  # Prevent unnecessary reboots
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none # Disable power saving for better performance
+  reboot_timeout: 10min # Prevent unnecessary reboots
   on_connect:
     - lambda: id(improv_ble_in_progress) = false;
     - script.execute: control_leds
@@ -178,12 +172,23 @@ api:
   on_client_disconnected:
     - script.execute: control_leds
 
-# http_request: 
+  encryption:
+    key: !secret api_encryption_key
+
+# http_request:
 #   verify_ssl: false
 
 ota:
   - platform: esphome
     id: ota_esphome
+    password: !secret ota_password
+
+web_server:
+  port: 80
+  version: 3
+  auth:
+    username: !secret device_name_web_username
+    password: !secret device_name_web_password
 
 i2c:
   - id: internal_i2c
@@ -204,11 +209,11 @@ psram:
 
 time:
   - platform: homeassistant
-  #- platform: pcf85063
+    #- platform: pcf85063
     id: rtc
-  #  address: 0x51
+    #  address: 0x51
     #RTC_INT = $rtc_int # extIO 5
-  #  i2c_id: internal_i2c
+    #  i2c_id: internal_i2c
 
     on_time:
       - seconds: 0
@@ -232,20 +237,20 @@ light:
           name: "Pulse Slow"
           min_brightness: 30%
           max_brightness: 100%
-          transition_length: 2000ms
-          update_interval: 3000ms
+          transition_length: 1000ms
+          update_interval: 16ms
       - pulse:
           name: "Pulse Medium"
           min_brightness: 30%
           max_brightness: 100%
           transition_length: 600ms
-          update_interval: 1200ms
+          update_interval: 16ms
       - pulse:
           name: "Pulse Fast"
           min_brightness: 30%
           max_brightness: 100%
           transition_length: 300ms
-          update_interval: 600ms
+          update_interval: 16ms
       - addressable_rainbow:
           name: "Rainbow Slow"
           speed: 6
@@ -255,20 +260,20 @@ light:
 
 i2s_audio:
   - id: i2s_output
-    i2s_lrclk_pin: 
+    i2s_lrclk_pin:
       number: $i2s_lrclk
       allow_other_uses: true
-    i2s_bclk_pin:  
+    i2s_bclk_pin:
       number: $i2s_bclk
       allow_other_uses: true
     i2s_mclk_pin:
       number: $i2s_mclk
 
   - id: i2s_input
-    i2s_lrclk_pin:  
+    i2s_lrclk_pin:
       number: $i2s_lrclk
       allow_other_uses: true
-    i2s_bclk_pin:  
+    i2s_bclk_pin:
       number: $i2s_bclk
       allow_other_uses: true
 
@@ -290,7 +295,7 @@ external_components:
       type: git
       url: "https://github.com/sw3Dan/waveshare-s2-audio_esphome_voice"
       ref: main
-    components: [ es8311 ]
+    components: [es8311]
     refresh: 0s
 
 audio_dac:
@@ -328,7 +333,7 @@ speaker:
   - platform: i2s_audio
     id: i2s_audio_speaker
     i2s_dout_pin: GPIO16
-    
+
     i2s_audio_id: i2s_output
     i2s_mode: secondary #using the patched es8311
 
@@ -375,12 +380,12 @@ media_player:
     volume_max: 0.8
     announcement_pipeline:
       speaker: announcement_resampling_speaker
-      format: FLAC     # FLAC is the least processor intensive codec
-      num_channels: 1  # Stereo audio is unnecessary for announcements
+      format: FLAC # FLAC is the least processor intensive codec
+      num_channels: 1 # Stereo audio is unnecessary for announcements
       sample_rate: 48000 #Supported by Music Assistant
     media_pipeline:
       speaker: media_resampling_speaker
-      format: FLAC     # FLAC is the least processor intensive codec
+      format: FLAC # FLAC is the least processor intensive codec
       sample_rate: 48000
     on_announcement:
       - mixer_speaker.apply_ducking:
@@ -402,17 +407,17 @@ media_player:
               decibel_reduction: 0
               duration: 1.0s
     on_mute:
-      - delay: 100ms  # Debounce
+      - delay: 100ms # Debounce
       - script.execute: control_leds_volume_changed
     on_unmute:
-      - delay: 100ms  # Debounce
+      - delay: 100ms # Debounce
       - script.execute: control_leds_volume_changed
     on_volume:
       if:
         condition:
           - lambda: return !id(init_in_progress);
-        then:  
-          - delay: 100ms  # Debounce
+        then:
+          - delay: 100ms # Debounce
           - script.execute: control_leds_volume_changed
     files:
       - id: mute_switch_on_sound
@@ -495,7 +500,7 @@ voice_assistant:
     - mixer_speaker.apply_ducking:
         id: media_mixing_input
         decibel_reduction: 30 #20  # Number of dB quieter; higher implies more quiet, 0 implies full volume
-        duration: 0.0s         # The duration of the transition (default is no transition)
+        duration: 0.0s # The duration of the transition (default is no transition)
   on_listening:
     - lambda: id(voice_assistant_phase) = ${voice_assist_waiting_for_command_phase_id};
     - script.execute: control_leds
@@ -509,7 +514,7 @@ voice_assistant:
     - if:
         condition:
           # A nonempty x variable means a streaming TTS url was sent to the media player
-          lambda: 'return !x.empty();'
+          lambda: "return !x.empty();"
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
@@ -519,7 +524,7 @@ voice_assistant:
     - if:
         condition:
           # The intent_progress trigger didn't start the TTS Reponse
-          lambda: 'return id(voice_assistant_phase) != ${voice_assist_replying_phase_id};'
+          lambda: "return id(voice_assistant_phase) != ${voice_assist_replying_phase_id};"
         then:
           - lambda: id(voice_assistant_phase) = ${voice_assist_replying_phase_id};
           - script.execute: control_leds
@@ -528,12 +533,12 @@ voice_assistant:
   on_tts_end:
     - script.execute:
         id: send_tts_uri_event
-        tts_uri: !lambda 'return x;'
+        tts_uri: !lambda "return x;"
   on_stt_end:
     - script.execute:
         id: send_stt_text_event
-        stt_text: !lambda 'return x;'
-    
+        stt_text: !lambda "return x;"
+
   # When the voice assistant ends ...
   on_end:
     - wait_until:
@@ -664,32 +669,32 @@ globals:
   - id: mic_gain_saved
     type: float
     restore_value: yes
-    initial_value: '32.0' #'24.0' DEBUG MIC
+    initial_value: "32.0" #'24.0' DEBUG MIC
   - id: mic_is_muted
     type: bool
     restore_value: yes
-    initial_value: 'false'
+    initial_value: "false"
 
   - id: led_ring_color_r
     type: float
     restore_value: yes
-    initial_value: '1.0'
+    initial_value: "1.0"
   - id: led_ring_color_g
     type: float
     restore_value: yes
-    initial_value: '0.0'
+    initial_value: "0.0"
   - id: led_ring_color_b
     type: float
     restore_value: yes
-    initial_value: '1.0'
+    initial_value: "1.0"
   - id: init_in_progress
     type: bool
     restore_value: no
-    initial_value: 'true'
+    initial_value: "true"
   - id: improv_ble_in_progress
     type: bool
     restore_value: no
-    initial_value: 'false'
+    initial_value: "false"
   - id: voice_assistant_phase
     type: int
     restore_value: no
@@ -715,13 +720,13 @@ globals:
   - id: factory_reset_requested
     type: bool
     restore_value: no
-    initial_value: 'false'
-
+    initial_value: "false"
 
 script:
   - id: flash_ring
     then:
-      - light.turn_on: { id: status_ring, red: 1.0, green: 0.0, blue: 0.0, brightness: 100% }
+      - light.turn_on:
+          { id: status_ring, red: 1.0, green: 0.0, blue: 0.0, brightness: 100% }
       - delay: 250ms
       - light.turn_off: status_ring
 
@@ -752,18 +757,18 @@ script:
                 then:
                   - light.turn_on:
                       id: status_ring
-                      brightness: !lambda 'return id(led_ring_brightness).state;'
-                      red: !lambda 'return id(led_ring_color_r);'
-                      green: !lambda 'return id(led_ring_color_g);'
-                      blue: !lambda 'return id(led_ring_color_b);'
+                      brightness: !lambda "return id(led_ring_brightness).state;"
+                      red: !lambda "return id(led_ring_color_r);"
+                      green: !lambda "return id(led_ring_color_g);"
+                      blue: !lambda "return id(led_ring_color_b);"
                 else:
                   - light.turn_on:
                       id: status_ring
-                      brightness: !lambda 'return id(led_ring_brightness).state;'
-                      red: !lambda 'return id(led_ring_color_r);'
-                      green: !lambda 'return id(led_ring_color_g);'
-                      blue: !lambda 'return id(led_ring_color_b);'
-                      effect: !lambda 'return effect;'
+                      brightness: !lambda "return id(led_ring_brightness).state;"
+                      red: !lambda "return id(led_ring_color_r);"
+                      green: !lambda "return id(led_ring_color_g);"
+                      blue: !lambda "return id(led_ring_color_b);"
+                      effect: !lambda "return effect;"
 
   # Single LED state machine (small footprint)
   - id: control_leds
@@ -847,7 +852,7 @@ script:
     then:
       - light.turn_on:
           id: status_ring
-          brightness: !lambda 'return id(led_ring_brightness).state;'
+          brightness: !lambda "return id(led_ring_brightness).state;"
           red: 0.0
           green: 1.0
           blue: 0.0
@@ -869,22 +874,22 @@ script:
   - id: enable_repeat_one
     then:
       - lambda: |-
-            id(external_media_player)
-              ->make_call()
-              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_REPEAT_ONE)
-              .set_announcement(true)
-              .perform();
-            id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 500);
+          id(external_media_player)
+            ->make_call()
+            .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_REPEAT_ONE)
+            .set_announcement(true)
+            .perform();
+          id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 500);
 
   - id: disable_repeat
     then:
       - lambda: |-
-            id(external_media_player)
-              ->make_call()
-              .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_REPEAT_OFF)
-              .set_announcement(true)
-              .perform();
-            id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 0);
+          id(external_media_player)
+            ->make_call()
+            .set_command(media_player::MediaPlayerCommand::MEDIA_PLAYER_COMMAND_REPEAT_OFF)
+            .set_announcement(true)
+            .perform();
+          id(external_media_player)->set_playlist_delay_ms(speaker::AudioPipelineType::ANNOUNCEMENT, 0);
 
   - id: play_sound
     parameters:
@@ -969,7 +974,6 @@ script:
                 isdigit(set_alarm_time[3]) && isdigit(set_alarm_time[4])) {
               auto alarm_hour = std::stoi(set_alarm_time.substr(0, 2));
               auto alarm_minute = std::stoi(set_alarm_time.substr(3, 2));
-
               auto time_now = id(rtc).now();
               if (time_now.hour == alarm_hour && time_now.minute == alarm_minute) {
                 auto action = id(alarm_action).state;
@@ -1072,13 +1076,12 @@ select:
         - lambda: |-
             id(saved_alarm_action) = x;
 
-
 switch:
-  - platform: template  #TODO: make react live
+  - platform: template #TODO: make react live
     id: diag_disable_mic
     name: "Diag: disable microphone"
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF  # default OFF = mic works as usual
+    restore_mode: RESTORE_DEFAULT_OFF # default OFF = mic works as usual
 
   - platform: gpio
     id: amp_enable_8
@@ -1112,7 +1115,7 @@ switch:
 
   - platform: template
     id: mute_sound
-    name: Mute-unmute sound
+    name: Mute or Unmute sound
     icon: "mdi:bullhorn"
     entity_category: config
     optimistic: true
@@ -1183,6 +1186,7 @@ number:
       - logger.log:
           format: "[MIC] Set ES7210 gain to %.0f dB"
           args: ["x"]
+
   - platform: template
     id: va_gain_factor
     name: "Gain Factor"
@@ -1234,11 +1238,9 @@ number:
           then:
             - light.turn_on:
                 id: status_ring
-                brightness: !lambda 'return x;'
-
+                brightness: !lambda "return x;"
 
 sensor:
-
   - platform: template
     id: next_timer
     name: "Next timer"
@@ -1280,7 +1282,7 @@ button:
 binary_sensor:
   - platform: gpio
     id: key1_button
-    name: "Key1"
+    name: "Key 1"
     pin:
       tca9555: ioexp
       number: 9 # not '12' as schematics say!
@@ -1290,7 +1292,7 @@ binary_sensor:
 
   - platform: gpio
     id: key2_button
-    name: "Key2"
+    name: "Key 2"
     pin:
       tca9555: ioexp
       number: 10
@@ -1300,7 +1302,7 @@ binary_sensor:
 
   - platform: gpio
     id: key3_button
-    name: "Key3"
+    name: "Key 3"
     pin:
       tca9555: ioexp
       number: 11
