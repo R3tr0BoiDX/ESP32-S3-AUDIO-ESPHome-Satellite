@@ -46,18 +46,6 @@ esphome:
   name_add_mac_suffix: true
   min_version: 2025.8.0
   on_boot:
-    - priority: -100
-      then:
-        - if:
-            condition:
-              switch.is_on: diag_disable_mic
-            then:
-              - logger.log: "Mic ENABLED"
-            else:
-              - logger.log: "Mic DISABLED for diagnostics"
-              - micro_wake_word.stop:
-              - voice_assistant.stop:
-              - microphone.stop_capture: i2s_mics
     - priority: 375
       then:
         - sensor.template.publish:
@@ -370,7 +358,7 @@ media_player:
     id: external_media_player
     name: None
     internal: False
-    volume_increment: 0.01
+    volume_increment: 0.05
     volume_min: 0.4
     volume_max: 0.8
     announcement_pipeline:
@@ -441,14 +429,12 @@ voice_assistant:
   auto_gain: 0 dbfs
   volume_multiplier: 1
   on_client_connected:
+    - lambda: id(init_in_progress) = false;
     - if:
         condition:
-          - lambda: return id(init_in_progress);
-          - switch.is_on: mic_mute_switch
+          switch.is_off: mute
         then:
-          - switch.turn_off: mic_mute_switch
-    - lambda: id(init_in_progress) = false;
-    - micro_wake_word.start:
+          - micro_wake_word.start:
     - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - script.execute: control_leds
   on_client_disconnected:
@@ -609,7 +595,7 @@ micro_wake_word:
     # If the wake word is detected when the device is muted (Possible with the software mute switch): Do nothing
     - if:
         condition:
-          switch.is_off: mic_mute_switch
+          switch.is_off: mute
         then:
           # If a timer is ringing: Stop it, do not start the voice assistant (We can stop timer from voice!)
           - if:
@@ -647,15 +633,6 @@ micro_wake_word:
                                 wake_word: !lambda return wake_word;
 
 globals:
-  - id: mic_gain_saved
-    type: float
-    restore_value: yes
-    initial_value: "32.0" #'24.0' DEBUG MIC
-  - id: mic_is_muted
-    type: bool
-    restore_value: yes
-    initial_value: "false"
-
   - id: led_ring_color_r
     type: float
     restore_value: yes
@@ -710,6 +687,24 @@ script:
           { id: status_ring, red: 1.0, green: 0.0, blue: 0.0, brightness: 100% }
       - delay: 250ms
       - light.turn_off: status_ring
+
+  - id: mute_feedback
+    parameters:
+      sound_file: "audio::AudioFile*"
+    then:
+      - if:
+          condition:
+            lambda: return !id(init_in_progress);
+          then:
+            - if:
+                condition:
+                  switch.is_on: mute_sound
+                then:
+                  - script.execute:
+                      id: play_sound
+                      priority: false
+                      sound_file: !lambda return sound_file;
+            - script.execute: flash_ring
 
   # Minimal dispatcher for LEDs: off / solid / built-in effects
   - id: led_set_effect
@@ -1058,12 +1053,6 @@ select:
             id(saved_alarm_action) = x;
 
 switch:
-  - platform: template #TODO: make react live
-    id: diag_disable_mic
-    name: "Diag: disable microphone"
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF # default OFF = mic works as usual
-
   - platform: gpio
     id: amp_enable_8
     name: "Amplifier"
@@ -1075,28 +1064,28 @@ switch:
       inverted: false
     restore_mode: RESTORE_DEFAULT_ON
 
+  # Mute = no wake word, no voice assistant. Restored across reboots.
   - platform: template
-    id: mic_mute_switch
-    name: "Microphone Mute"
+    id: mute
+    name: "Mute"
     icon: mdi:microphone-off
+    optimistic: true
     restore_mode: RESTORE_DEFAULT_OFF
-    lambda: |-
-      return id(mic_is_muted);
-    turn_on_action:
-      - lambda: |-
-          id(mic_is_muted) = true;
-          // "Mute" by dropping gain to 0 dB (effectively off for many capsules)
-          id(adc_mic).set_mic_gain(0.0f);
-      - script.execute: flash_ring
-    turn_off_action:
-      - lambda: |-
-          id(mic_is_muted) = false;
-          id(adc_mic).set_mic_gain(id(mic_gain_saved));
-      - script.execute: flash_ring
+    on_turn_on:
+      - micro_wake_word.stop:
+      - voice_assistant.stop:
+      - script.execute:
+          id: mute_feedback
+          sound_file: !lambda return id(mute_switch_on_sound);
+    on_turn_off:
+      - micro_wake_word.start:
+      - script.execute:
+          id: mute_feedback
+          sound_file: !lambda return id(mute_switch_off_sound);
 
   - platform: template
     id: mute_sound
-    name: "Mute sound"
+    name: "Mute toggle sound"
     icon: "mdi:bullhorn"
     entity_category: config
     optimistic: true
@@ -1270,8 +1259,16 @@ binary_sensor:
       tca9555: ioexp
       number: 9 # not '12' as schematics say!
       inverted: true
+    # click = volume down, hold = repeat every 200 ms
     on_press:
       - media_player.volume_down: external_media_player
+      - delay: 500ms
+      - while:
+          condition:
+            binary_sensor.is_on: key1_button
+          then:
+            - media_player.volume_down: external_media_player
+            - delay: 200ms
 
   - platform: gpio
     id: key2_button
@@ -1281,8 +1278,27 @@ binary_sensor:
       tca9555: ioexp
       number: 10
       inverted: true
-    on_press:
-      - media_player.toggle: external_media_player
+    on_multi_click:
+      # double click = toggle mute
+      - timing:
+          - ON for at most 400ms
+          - OFF for at most 300ms
+          - ON for at most 400ms
+          - OFF for at least 50ms
+        then:
+          - switch.toggle: mute
+      # click = stop ringing alarm/timer, else play/pause
+      - timing:
+          - ON for at most 400ms
+          - OFF for at least 300ms
+        then:
+          - if:
+              condition:
+                switch.is_on: timer_ringing
+              then:
+                - switch.turn_off: timer_ringing
+              else:
+                - media_player.toggle: external_media_player
 
   - platform: gpio
     id: key3_button
@@ -1292,5 +1308,13 @@ binary_sensor:
       tca9555: ioexp
       number: 11
       inverted: true
+    # click = volume up, hold = repeat every 200 ms
     on_press:
       - media_player.volume_up: external_media_player
+      - delay: 500ms
+      - while:
+          condition:
+            binary_sensor.is_on: key3_button
+          then:
+            - media_player.volume_up: external_media_player
+            - delay: 200ms
