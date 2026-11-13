@@ -112,22 +112,82 @@ speaker:
 ** Then create speaker: speaker/resamplers as needed ** 
 ```
 
-General TODO/wishlist for the device.
-* filter speaker output from mic input using IDF-SR library (IN PROGRESS!)
-* UI: disable LEDS
-* UI: disable Voice/wake-word
-* UI/ESP: Forward output to external speaker (music assistant announcement support?)
-* ESP: lower volume on room speakers when wake-word detected
-* UI: expose mic and model sensitivity calibration settings
-* UI: select buttons behavior
-* ESP: long-press (volume) and double-click  (deactivate Voice) button support
-* ESP: Volume percentage Led animation
-* ESP: rotary rainbow - assistant working
-* ESP: alarm flash led animation
-* ESP: pulsing red - no connection led animation
-* ESP: code cleanup - change code structure and split into packages
-* UI: structure/names
-* ESP: mmWave module (control mic activation to limit room exposure)
-* ESP: stream/listen to audio (mic output volume trigger)
-* ESP: fix RTC
-* UI: set TimeZone
+## Controls
+
+| Key | Click | Hold / double click |
+|-----|-------|---------------------|
+| 1 | Volume down | Hold: repeat every 200 ms |
+| 2 | Stop ringing alarm/timer, else play/pause | Double click: toggle `Mute` |
+| 3 | Volume up | Hold: repeat every 200 ms |
+
+`Mute` stops wake word detection and the voice assistant. `LED ring enabled` turns all LED feedback off.
+
+## LED ring
+
+| State | LEDs |
+|-------|------|
+| Booting | Rainbow |
+| No Wi-Fi / HA connection | Red pulse |
+| Wake word detected | Solid blue `#03A9F4` |
+| Listening / replying | HA blue bands, slow rotation |
+| Thinking | HA blue bands, fast rotation |
+| Error | Red fast pulse |
+| Alarm/timer ringing | Purple strobe |
+| Timer running | Purple slow pulse |
+| Volume change | Green bar, one LED per 1/7 of the volume |
+
+## Time
+
+The on-board PCF85063 RTC is read at boot and updated on every Home Assistant time sync, so alarms keep working without HA.
+
+## Secrets
+
+`secrets.yaml` (not in git) needs: `wifi_ssid`, `wifi_password`, `api_encryption_key`, `ota_password`, `device_name_web_username`, `device_name_web_password`.
+
+## Lower room speakers during a voice request
+
+The device ducks its own media. To also turn down other speakers in the room, snapshot them when the satellite leaves `idle` and restore them when it goes back to `idle`. Replace the entity ids with your own:
+
+``` yaml
+automation:
+  - alias: Duck room speakers during voice requests
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: assist_satellite.waveshare_audio_3_assist_satellite
+        from: idle
+        not_to: [unavailable, unknown]
+        id: active
+      - trigger: state
+        entity_id: assist_satellite.waveshare_audio_3_assist_satellite
+        to: idle
+        not_from: [unavailable, unknown]
+        id: idle
+    actions:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: active
+            sequence:
+              - action: scene.create
+                data:
+                  scene_id: before_voice_request
+                  snapshot_entities:
+                    - media_player.living_room
+              - action: media_player.volume_set
+                target:
+                  entity_id: media_player.living_room
+                data:
+                  volume_level: 0.1
+          - conditions:
+              - condition: trigger
+                id: idle
+            sequence:
+              - action: scene.turn_on
+                target:
+                  entity_id: scene.before_voice_request
+```
+
+## TODO
+
+* Filter speaker output from the mic input (echo cancellation with the IDF-SR AFE). Until then, ducking is the stopgap.
