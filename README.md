@@ -109,6 +109,17 @@ substitutions:
   i2s_bps: 16bit
   i2s_mclk_multiple: 256
 
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        # The ES8311 derives BCLK/LRCK from MCLK, which the ESP32 only outputs while
+        # the speaker port runs. Start it silently (timeout: never keeps it on),
+        # otherwise the mic gets no clock until the first sound plays.
+        - lambda: |-
+            id(i2s_audio_speaker)->set_audio_stream_info(audio::AudioStreamInfo(16, 2, ${i2s_sample_rate}));
+            id(i2s_audio_speaker)->start();
+
 external_components:
   - source:
       type: git
