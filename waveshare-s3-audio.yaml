@@ -39,6 +39,9 @@ substitutions:
 
   hidden_ssid: "false"
   led_num: "7" # WS2812 ring leds
+  # HA Bands effect: ms per full rotation
+  ha_bands_slow_period: "3000"
+  ha_bands_fast_period: "1000"
 
 esphome:
   name: $device_name
@@ -220,26 +223,66 @@ light:
           name: "Pulse Slow"
           min_brightness: 30%
           max_brightness: 100%
-          transition_length: 1000ms
-          update_interval: 16ms
+          transition_length: 2000ms
+          update_interval: 2000ms
       - pulse:
           name: "Pulse Medium"
           min_brightness: 30%
           max_brightness: 100%
           transition_length: 600ms
-          update_interval: 16ms
+          update_interval: 600ms
       - pulse:
           name: "Pulse Fast"
           min_brightness: 30%
           max_brightness: 100%
           transition_length: 300ms
-          update_interval: 16ms
+          update_interval: 300ms
       - addressable_rainbow:
           name: "Rainbow Slow"
           speed: 6
           width: 7
       - addressable_color_wipe:
           name: "Wipe"
+      - addressable_lambda:
+          name: "HA Bands Slow"
+          update_interval: 16ms
+          lambda: |-
+            // Hard Home Assistant blue bands rotating around the ring
+            static const Color bands[4] = {Color(0x00, 0x6A, 0xC0), Color(0x03, 0xA9, 0xF4),
+                                           Color(0x61, 0xC9, 0xFF), Color(0x97, 0xE8, 0xFF)};
+            const float phase = (millis() % ${ha_bands_slow_period}) / float(${ha_bands_slow_period});
+            for (int i = 0; i < it.size(); i++)
+              it[i] = bands[int((float(i) / it.size() + phase) * 4) % 4];
+      - addressable_lambda:
+          name: "HA Bands Fast"
+          update_interval: 16ms
+          lambda: |-
+            // Hard Home Assistant blue bands rotating around the ring
+            static const Color bands[4] = {Color(0x00, 0x6A, 0xC0), Color(0x03, 0xA9, 0xF4),
+                                           Color(0x61, 0xC9, 0xFF), Color(0x97, 0xE8, 0xFF)};
+            const float phase = (millis() % ${ha_bands_fast_period}) / float(${ha_bands_fast_period});
+            for (int i = 0; i < it.size(); i++)
+              it[i] = bands[int((float(i) / it.size() + phase) * 4) % 4];
+      - addressable_lambda:
+          name: "Volume"
+          update_interval: 16ms
+          lambda: |-
+            // round(volume x leds) LEDs in the current color, rest dark
+            auto *mp = id(external_media_player);
+            const int n = mp->is_muted() ? 0 : (int) roundf(mp->volume * it.size());
+            for (int i = 0; i < it.size(); i++)
+              it[i] = i < n ? current_color : Color::BLACK;
+      - strobe:
+          name: "Strobe"
+          colors:
+            - state: true
+              brightness: 100%
+              red: 60%
+              green: 0%
+              blue: 60%
+              duration: 300ms
+            - state: false
+              duration: 300ms
 
 i2s_audio:
   - id: i2s_output
@@ -683,10 +726,10 @@ globals:
 script:
   - id: flash_ring
     then:
-      - light.turn_on:
-          { id: status_ring, red: 1.0, green: 0.0, blue: 0.0, brightness: 100% }
+      - script.execute:
+          { id: led_set_effect, effect: "solid", r: 1.0, g: 0.0, b: 0.0 }
       - delay: 250ms
-      - light.turn_off: status_ring
+      - script.execute: control_leds
 
   - id: mute_feedback
     parameters:
@@ -723,7 +766,7 @@ script:
                    effect.c_str(), r, g, b, (float) id(led_ring_brightness).state);
       - if:
           condition:
-            lambda: 'return effect == "off";'
+            lambda: 'return effect == "off" || !id(led_ring_enabled).state;'
           then:
             - light.turn_off: status_ring
           else:
@@ -783,24 +826,24 @@ script:
             set("Pulse Medium", 1.0, 0.0, 0.0);
             return;
           }
-          if (ringing) {                             // Timer ringing
-            set("Pulse Fast", 0.6, 0.0, 0.6);
+          if (ringing) {                             // Alarm/timer ringing
+            set("Strobe", 0.6, 0.0, 0.6);
             return;
           }
 
           // Voice assistant phases
           switch (phase) {
-            case ${voice_assist_waiting_for_command_phase_id}: // just woke
-              set("solid", 0.5, 0.0, 0.5);  // calm solid violet
+            case ${voice_assist_waiting_for_command_phase_id}: // wake word detected
+              set("solid", 0.012, 0.663, 0.957);  // #03A9F4
               return;
             case ${voice_assist_listening_for_command_phase_id}:
-              set("Pulse Medium", 0.8, 0.0, 0.8);
+              set("HA Bands Slow", 0, 0, 0);
               return;
             case ${voice_assist_thinking_phase_id}:
-              set("Pulse Slow", 0.6, 0.0, 0.6);
+              set("HA Bands Fast", 0, 0, 0);
               return;
             case ${voice_assist_replying_phase_id}:
-              set("Wipe", 0.6, 0.0, 0.6);
+              set("HA Bands Slow", 0, 0, 0);
               return;
             case ${voice_assist_error_phase_id}:
               set("Pulse Fast", 1.0, 0.0, 0.0);
@@ -820,19 +863,12 @@ script:
           // Idle
           set("off", 0, 0, 0);
 
-  # Brief green pulse when volume changes, then restore
+  # Show volume as green LEDs, then restore
   - id: control_leds_volume_changed
     mode: restart
     then:
-      - light.turn_on:
-          id: status_ring
-          brightness: !lambda "return id(led_ring_brightness).state;"
-          red: 0.0
-          green: 1.0
-          blue: 0.0
-          effect: "Pulse Fast"
-      - lambda: |-
-          ESP_LOGD("led", "volume_changed: flash green"); //DEBUG
+      - script.execute:
+          { id: led_set_effect, effect: "Volume", r: 0.0, g: 1.0, b: 0.0 }
       - delay: 1.2s
       - script.execute: control_leds
 
@@ -1090,6 +1126,18 @@ switch:
     entity_category: config
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: template
+    id: led_ring_enabled
+    name: "LED ring enabled"
+    icon: mdi:led-on
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: control_leds
+    on_turn_off:
+      - script.execute: control_leds
 
   - platform: template
     id: wake_sound
